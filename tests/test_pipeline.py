@@ -260,3 +260,61 @@ def test_since_reports_stale_watcher(cfg, capsys):
     assert "Watcher fault: stale" in out and "4h" in out
     main(["status"])
     assert "FAULT stale" in capsys.readouterr().out
+
+
+def test_ignore_rules_with_order_follow_up(cfg):
+    (cfg.out).mkdir(parents=True, exist_ok=True)
+    (cfg.out / "rules.yaml").write_text(
+        "ignore:\n"
+        "  - name: Relatives' orders\n"
+        "    from_domains: [amazon.com]\n"
+        "    all:\n"
+        "      - any: [Doe, Roe]\n"
+        "      - any: ['Springfield, IL', 'Shelbyville, IL']\n"
+        "    follow_orders: true\n")
+    amz = "Amazon.com <shipment-tracking@amazon.com>"
+    theirs = make_msg("Your Amazon.com order #111-2222222-3333333", amz,
+                      "Ordered: Garden hose. Ship to: Jane DOE\nSPRINGFIELD IL 62701. Order # 111-2222222-3333333 $24.99")
+    delivered = make_msg("Delivered: Garden hose", amz, "Your package was delivered. Order # 111-2222222-3333333")
+    mine = make_msg("Your Amazon.com order #444-5555555-6666666", amz,
+                    "Ordered: A biography of the Doe family. Ship to: Alex Example, Anytown, CA. $18.00")
+    other_town = make_msg("Your Amazon.com order #777-8888888-9999999", amz,
+                          "Ship to: Alex Example, Springfield, IL. Order # 777-8888888-9999999 $5.00")   # name doesn't match
+    not_amazon = make_msg("Dinner", "Jane Doe <jane@example.org>", "See you in Springfield, IL!")
+    box = {"INBOX": [(1, theirs, NOW - timedelta(hours=3)), (2, delivered, NOW - timedelta(hours=1)),
+                     (3, mine, NOW), (4, other_town, NOW), (5, not_amazon, NOW)]}
+    p, _, llm = _pipe(cfg, box)
+    p.workers = 1
+    p.run()
+    tiers = {r["subject"]: r["tier"] for r in p.store.q("SELECT subject, tier FROM messages")}
+    assert tiers["Your Amazon.com order #111-2222222-3333333"] == "ignored"
+    assert tiers["Delivered: Garden hose"] == "ignored"                      # order follow-up
+    assert tiers["Your Amazon.com order #444-5555555-6666666"] != "ignored"  # name alone isn't enough
+    assert tiers["Your Amazon.com order #777-8888888-9999999"] != "ignored"  # town alone isn't enough
+    assert tiers["Dinner"] != "ignored"                                       # wrong sender domain
+    sent = " ".join(r["input"][1]["content"] for r in llm.requests)
+    assert "Garden hose" not in sent, "ignored mail never reaches a model"
+    digest = next((cfg.out / "digest").glob("*.md")).read_text()
+    assert "2 ignored (Relatives' orders: 2)" in digest
+    assert not [r for r in (cfg.out / "records").rglob("*.json") if "Garden hose" in r.read_text()]
+
+
+def test_ignore_rule_without_content_test_is_refused(tmp_path):
+    from mailwatch.rules import load_overrides
+    (tmp_path / "rules.yaml").write_text("ignore:\n  - name: everything from amazon\n    from_domains: [amazon.com]\n")
+    assert load_overrides(tmp_path / "rules.yaml")["ignore"] == []
+
+
+def test_reprocess_by_domain_applies_new_ignore_rule(cfg):
+    amz = "Amazon.com <shipment-tracking@amazon.com>"
+    box = {"INBOX": [(1, make_msg("Shipped", amz, "Ship to: Jane Doe, Springfield, IL. $3.00"), NOW),
+                     (2, make_msg("Hi", "Dana <dana@example.org>", "Lunch?"), NOW)]}
+    p, _, _ = _pipe(cfg, box)
+    p.run()
+    (cfg.out / "rules.yaml").write_text("ignore:\n  - name: R\n    from_domains: [amazon.com]\n"
+                                        "    all: [{any: [Doe]}, {any: ['Springfield, IL']}]\n")
+    p2, _, llm2 = _pipe(cfg, box)
+    assert p2.reprocess("triage", domain="amazon.com") == 1
+    p2.run(skip_ingest=True)
+    assert p2.store.one("SELECT tier FROM messages WHERE subject='Shipped'")["tier"] == "ignored"
+    assert len(llm2.requests) == 0

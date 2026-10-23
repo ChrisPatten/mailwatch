@@ -10,10 +10,11 @@ import yaml
 
 from .normalize import Normalized, reg_domain
 
-TIERS = ["priority", "personal", "outbound", "transactional", "bulk_relevant", "marketing", "spam"]
+TIERS = ["priority", "personal", "outbound", "transactional", "bulk_relevant", "marketing", "spam", "ignored"]
 FULL_TIERS = {"priority", "personal", "transactional", "outbound"}
 LIGHT_TIERS = {"bulk_relevant"}
-INDEX_ONLY = {"marketing", "spam", "internal"}
+INDEX_ONLY = {"marketing", "spam", "internal", "ignored"}
+DEFAULT_ORDER_RE = r"\b\d{3}-\d{7}-\d{7}\b"     # Amazon-style order numbers
 
 
 @dataclass
@@ -58,7 +59,70 @@ def load_overrides(path: Path) -> dict[str, Any]:
     d = yaml.safe_load(path.read_text()) or {}
     norm = lambda m: {str(k).lower(): str(v) for k, v in (m or {}).items() if str(v) in TIERS}
     return {"senders": norm(d.get("senders")), "domains": norm(d.get("domains")),
-            "no_fetch_domains": [str(x).lower().strip() for x in (d.get("no_fetch_domains") or []) if str(x).strip()]}
+            "no_fetch_domains": [str(x).lower().strip() for x in (d.get("no_fetch_domains") or []) if str(x).strip()],
+            "ignore": [r for r in (_ignore_rule(x) for x in (d.get("ignore") or [])) if r]}
+
+
+@dataclass
+class IgnoreRule:
+    """Content rule: mail matching it is indexed as `ignored` and never sent to a model.
+
+    from_domains  sender's registrable domain must be one of these (empty = any sender)
+    all           list of groups; every group must match. A group is a list of phrases, any of which
+                  may match (case-insensitive, whole words, whitespace-insensitive)
+    follow_orders remember order numbers from matching mail for 30 days; later mail from the same
+                  domains that mentions one is ignored too (catches "delivered" emails with no address)
+    """
+    name: str
+    from_domains: list[str]
+    groups: list[list[str]]
+    follow_orders: bool = False
+    order_pattern: str = DEFAULT_ORDER_RE
+
+
+def _ignore_rule(x: Any) -> IgnoreRule | None:
+    if not isinstance(x, dict):
+        return None
+    groups: list[list[str]] = []
+    for g in x.get("all") or []:
+        phrases = g.get("any") if isinstance(g, dict) else g
+        phrases = [str(p).strip() for p in (phrases if isinstance(phrases, list) else [phrases]) if str(p).strip()]
+        if phrases:
+            groups.append(phrases)
+    if x.get("any"):
+        groups.append([str(p).strip() for p in x["any"] if str(p).strip()])
+    if not groups:
+        return None   # a rule with no content test would ignore everything from the domain: refuse it
+    return IgnoreRule(name=str(x.get("name") or "ignore rule")[:80],
+                      from_domains=[reg_domain(str(dm)) for dm in (x.get("from_domains") or [])],
+                      groups=groups, follow_orders=bool(x.get("follow_orders")),
+                      order_pattern=str(x.get("order_pattern") or DEFAULT_ORDER_RE))
+
+
+def _squash(s: str) -> str:
+    """Lowercase, punctuation that varies between senders (", ; : |") to spaces, whitespace collapsed:
+    "SHREWSBURY, MA" and "Shrewsbury MA" compare equal."""
+    return re.sub(r"\s+", " ", re.sub(r"[,;:|]", " ", s or "")).strip().lower()
+
+
+def _phrase_re(p: str) -> re.Pattern[str]:
+    words = [re.escape(w) for w in _squash(p).split(" ") if w]
+    return re.compile(r"(?<![a-z0-9])" + r"\s+".join(words) + r"(?![a-z0-9])")
+
+
+def ignore_match(n: Normalized, rules: list[IgnoreRule], known_orders: set[str]) -> tuple[str, list[str]]:
+    """Returns (rule name, order numbers to remember) or ("", [])."""
+    dom = reg_domain(n.from_addr.rsplit("@", 1)[-1]) if "@" in n.from_addr else ""
+    text = _squash(" ".join([n.subject, n.text, n.quoted]))
+    for r in rules:
+        if r.from_domains and dom not in r.from_domains:
+            continue
+        orders = sorted(set(re.findall(r.order_pattern, " ".join([n.subject, n.text])))) if r.follow_orders else []
+        if all(any(_phrase_re(p).search(text) for p in g) for g in r.groups):
+            return r.name, orders
+        if r.follow_orders and known_orders.intersection(orders):
+            return f"{r.name} (order follow-up)", orders
+    return "", []
 
 
 @dataclass

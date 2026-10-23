@@ -38,6 +38,8 @@ senders: {}
 domains: {}
 # Domains mailwatch never fetches (in addition to [fetch].skip_domains in config.toml).
 no_fetch_domains: []
+# Content rules: matching mail is indexed as "ignored" and never sent to a model. See README.
+ignore: []
 YAML
 
 # Every keychain:// reference in config.toml that doesn't exist yet gets a prompt.

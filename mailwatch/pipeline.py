@@ -23,7 +23,8 @@ from .grounding import Corpus, ground, strip_urls, to_record_extract
 from .ingest import Ingestor
 from .llm import LLMError, LLMUnavailable, Models
 from .normalize import Link, Normalized, normalize
-from .rules import FULL_TIERS, INDEX_ONLY, LIGHT_TIERS, load_overrides, load_watchlist, pre_tier, watch_match
+from .rules import (FULL_TIERS, INDEX_ONLY, LIGHT_TIERS, ignore_match, load_overrides, load_watchlist, pre_tier,
+                    watch_match)
 from .schemas import EXTRACT_SCHEMA, TRIAGE_SCHEMA, Extract, Triage
 from .store import Store
 
@@ -184,6 +185,14 @@ class Pipeline:
         known = self.store.is_correspondent(n.from_addr)
         rr = pre_tier(n, owner=self.cfg.owner_addresses, exclude=self.cfg.exclude_senders,
                       overrides=self.overrides, watch=wm, known_sender=known)
+        if rr.tier not in ("internal", "outbound") and self.overrides.get("ignore"):
+            hit, orders = ignore_match(n, self.overrides["ignore"], self.store.ignored_orders())
+            if hit:
+                # rules.yaml `ignore`: indexed, never sent to a model. Order numbers are remembered
+                # so later mail about the same order (no address in it) is ignored too.
+                if orders:
+                    self.store.add_ignored_orders(orders, hit)
+                rr.tier, rr.reason = "ignored", f"ignore rule: {hit}"
         n.signals = rr.signals
         work: dict[str, Any] = {"rule": {"tier": rr.tier, "reason": rr.reason}}
         if rr.tier:
@@ -338,6 +347,8 @@ class Pipeline:
         line = {"id": msg_id, "account": self.store.msg(msg_id)["account"], "folder": self.store.msg(msg_id)["folder"],
                 "date": n.date, "from": n.from_addr, "subject": n.subject[:160], "tier": tier,
                 "importance": tri.get("importance", 1), "emitted_at": now}
+        if tier == "ignored":
+            line["rule"] = tri.get("reason", "").removeprefix("ignore rule: ").removesuffix(" (order follow-up)")
         emit.append_index(self.cfg.out, line)
         stale = self.cfg.out / "records" / emit.day_of(line) / f"{msg_id}.json"
         if tier in INDEX_ONLY and stale.exists():
@@ -364,13 +375,16 @@ class Pipeline:
         except Exception:
             log.exception("minimal emit failed for %s", msg_id)
 
-    def reprocess(self, start: str, tier: str = "", failed_only: bool = False) -> int:
-        """Send done messages back through the model stages (after a key fix or a model change)."""
+    def reprocess(self, start: str, tier: str = "", failed_only: bool = False, domain: str = "") -> int:
+        """Send done messages back through the model stages (after a key, rule or model change)."""
+        from .normalize import reg_domain
         stage = {"triage": "normalized", "fetch": "triaged", "extract": "fetched"}[start]
-        rows = self.store.q("SELECT id, tier FROM messages WHERE stage='done'" + (" AND tier=?" if tier else ""),
+        rows = self.store.q("SELECT id, tier, from_addr FROM messages WHERE stage='done'" + (" AND tier=?" if tier else ""),
                             (tier,) if tier else ())
         n = 0
         for r in rows:
+            if domain and reg_domain((r["from_addr"] or "").rsplit("@", 1)[-1]) != reg_domain(domain):
+                continue
             if failed_only and not self.load_work(r["id"]).get("extraction_failed"):
                 continue
             if start in ("fetch", "extract") and not self.load_work(r["id"]).get("triage"):
@@ -448,6 +462,7 @@ class Pipeline:
                 self.store.x("UPDATE faults SET notified_at=? WHERE key=?", (time.time(), f["key"]))
 
     def prune(self) -> None:
+        self.store.prune_ignored_orders()
         keep_s = self.cfg.retention_days * 86400
         cutoff_day = (date.today() - timedelta(days=self.cfg.retention_days)).isoformat()
         for sub in ("records", "digest", "index"):

@@ -257,7 +257,7 @@ def cmd_doctor(cfg: config_mod.Config, a: argparse.Namespace) -> int:
 
 def cmd_reprocess(cfg: config_mod.Config, a: argparse.Namespace) -> int:
     from .pipeline import Pipeline
-    n = Pipeline(cfg).reprocess(a.start, a.tier or "", a.failed)
+    n = Pipeline(cfg).reprocess(a.start, a.tier or "", a.failed, a.domain or "")
     print(f"{n} messages queued from {a.start}; run `mailwatch run --skip-ingest` to process them")
     return 0
 
@@ -310,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--from", dest="start", choices=["triage", "fetch", "extract"], default="triage")
     rp.add_argument("--tier", help="only this tier")
     rp.add_argument("--failed", action="store_true", help="only records with extraction_failed")
+    rp.add_argument("--domain", help="only mail from this sender domain, e.g. amazon.com")
     lb = sub.add_parser("label")
     lb.add_argument("--limit", type=int, default=300)
     ev = sub.add_parser("eval")

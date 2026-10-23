@@ -138,7 +138,7 @@ Rules worth putting in your agent's instructions:
 | **Extract** | One call per message with the body, attachments, fetched pages and earlier summaries from the thread. Returns obligations, money, events, shipments, action items, questions, people and artifact notes. Then the grounding check. |
 | **Emit** | Writes the record, index line and daily digest. Prunes everything past `retention_days`. |
 
-Tiers: `priority`, `personal`, `transactional`, `bulk_relevant`, `marketing`, `spam`, plus `outbound` (your sent mail, mined for commitments) and `internal` (your agent's own mailbox, skipped).
+Tiers: `priority`, `personal`, `transactional`, `bulk_relevant`, `marketing`, `spam`, plus `outbound` (your sent mail, mined for commitments), `internal` (your agent's own mailbox, skipped) and `ignored` (matched an ignore rule).
 
 ### Watchlist
 
@@ -148,6 +148,26 @@ Optional. A markdown file your agent maintains, with one `### Title` section per
 ### Mortgage escrow letter
 - Watch for: escrow analysis or payment-change notice from examplemortgage.com
 ```
+
+### rules.yaml: overrides and ignore rules
+
+`<out>/rules.yaml` is the one file your agent is allowed to edit. It's read at the start of every run.
+
+```yaml
+senders: {"newsletter@example.com": marketing}   # sender or domain -> tier
+domains: {"school.example.org": priority}         # upgrades apply only to DMARC-verified senders
+no_fetch_domains: [examplebank.com]               # links listed for a human, never fetched
+
+ignore:                                           # content rules: indexed as `ignored`, never sent to a model
+  - name: Relatives' orders on a shared account
+    from_domains: [amazon.com]
+    all:                                          # every group must match; any phrase within a group
+      - any: [Doe, Roe]                           # case-, whitespace- and comma-insensitive, whole words
+      - any: ["Springfield, IL", "Shelbyville, IL"]
+    follow_orders: true                           # remember order numbers 30 days; catch "delivered" mail without the address
+```
+
+An ignore rule needs at least one content group, so a bare `from_domains` can't silence a whole sender. Ignored mail still counts toward `seen N / N` and shows in the digest's "Filtered" line by rule name. After adding a rule, `mailwatch reprocess --from triage --domain amazon.com` applies it to mail already processed.
 
 ## Choosing models
 
@@ -171,7 +191,7 @@ It reports tier accuracy, priority and personal recall, marketing precision, exa
 | `mailwatch since [--advance]` | New records since the cursor |
 | `mailwatch ask <id> "<q>"` | Tool-less answer from the raw message (untrusted text) |
 | `mailwatch link <id> Ln` / `open <artifact>` | For a human |
-| `mailwatch reprocess --from triage\|fetch\|extract [--tier T] [--failed]` | Redo stages after a key, rule or model change |
+| `mailwatch reprocess --from triage\|fetch\|extract [--tier T] [--domain D] [--failed]` | Redo stages after a key, rule or model change |
 | `mailwatch digest` | Rebuild digests |
 | `mailwatch doctor` | Config, live key and model check, IMAP logins and folders |
 | `mailwatch label` / `eval` | Bake-off |

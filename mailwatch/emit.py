@@ -137,6 +137,7 @@ def build_digest(out: Path, day: str, seen: dict[str, str], faults: list[dict[st
                 continue
     ip = out / "index" / f"{day}.jsonl"
     last_tier: dict[str, str] = {}
+    last_rule: dict[str, str] = {}
     if ip.exists():
         for line in ip.read_text().splitlines():
             try:
@@ -144,6 +145,7 @@ def build_digest(out: Path, day: str, seen: dict[str, str], faults: list[dict[st
             except Exception:
                 continue
             last_tier[d["id"]] = d["tier"]
+            last_rule[d["id"]] = d.get("rule", "")
     tiers: Counter[str] = Counter(last_tier.values())
     seen_ids = set(last_tier)
     recs.sort(key=lambda r: (-(r.get("importance") or 0), r.get("date") or ""))
@@ -159,6 +161,10 @@ def build_digest(out: Path, day: str, seen: dict[str, str], faults: list[dict[st
             lines.append(f"- {f['key']}: {f['detail']} (since {datetime.fromtimestamp(f['first_seen']).strftime('%m-%d %H:%M')})")
     lines += render_items(recs)
     filt = ", ".join(f"{tiers[t]} {t}" for t in ("marketing", "spam", "internal") if tiers[t])
+    if tiers["ignored"]:
+        by_rule = Counter(last_rule[i] or "rule" for i, t in last_tier.items() if t == "ignored")
+        filt = ", ".join(x for x in [filt, f"{tiers['ignored']} ignored ("
+                                     + "; ".join(f"{k}: {v}" for k, v in by_rule.most_common()) + ")"] if x)
     lines += ["", f"Filtered: {filt or 'none'}. Total messages today: {len(seen_ids)}."]
     p = out / "digest" / f"{day}.md"
     _atomic_write(p, "\n".join(lines) + "\n")

@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS faults (
   key TEXT PRIMARY KEY, first_seen REAL, last_seen REAL, count INTEGER, detail TEXT,
   notified_at REAL, open INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS ignored_orders (
+  order_no TEXT PRIMARY KEY, rule TEXT, added REAL
+);
 CREATE TABLE IF NOT EXISTS labels (
   msg_id TEXT PRIMARY KEY, tier TEXT, gold TEXT, labelled_at REAL
 );
@@ -153,6 +156,19 @@ class Store:
 
     def is_correspondent(self, addr: str) -> bool:
         return self.one("SELECT 1 FROM correspondents WHERE address=?", (addr.lower(),)) is not None
+
+    # -- ignore-rule order follow-up ----------------------------------------
+    def ignored_orders(self, max_age_days: int = 30) -> set[str]:
+        cutoff = time.time() - max_age_days * 86400
+        return {r["order_no"] for r in self.q("SELECT order_no FROM ignored_orders WHERE added >= ?", (cutoff,))}
+
+    def add_ignored_orders(self, orders: list[str], rule: str) -> None:
+        for o in orders:
+            self.x("INSERT INTO ignored_orders VALUES (?,?,?) ON CONFLICT(order_no) DO UPDATE SET added=excluded.added",
+                   (o, rule, time.time()))
+
+    def prune_ignored_orders(self, max_age_days: int = 30) -> None:
+        self.x("DELETE FROM ignored_orders WHERE added < ?", (time.time() - max_age_days * 86400,))
 
     # -- runs / faults -----------------------------------------------------
     def start_run(self) -> int:
