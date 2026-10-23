@@ -51,7 +51,7 @@ Be clear-eyed about these before you rely on it:
 ## Quick start (macOS)
 
 ```bash
-git clone https://github.com/<you>/mailwatch && cd mailwatch
+git clone https://github.com/ChrisPatten/mailwatch && cd mailwatch
 scripts/install.sh            # creates .venv and config.toml, then stops
 $EDITOR config.toml           # [owner], [[accounts]], [paths].out, [models]
 scripts/install.sh            # stores secrets in the login keychain, runs `mailwatch doctor`
