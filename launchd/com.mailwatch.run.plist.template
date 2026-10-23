@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Rendered by scripts/install.sh --load (@ROOT@ and @CONFIG@ are filled in). -->
+<!-- Rendered by scripts/install.sh with the load option; @ROOT@ and @CONFIG@ are filled in. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -12,9 +12,17 @@
         <string>run</string>
     </array>
 
-    <!-- Every 15 minutes. After sleep, launchd fires on wake and last_uid catches up. -->
-    <key>StartInterval</key>
-    <integer>900</integer>
+    <!-- Every 15 minutes (:00, :15, :30, :45). Calendar slots rather than StartInterval: an
+         interval job that was reloaded from Terminal was seen to never fire on its own, while
+         calendar slots did. If the Mac is asleep at a slot, launchd runs it once on wake, and
+         last_uid catches up. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Minute</key><integer>45</integer></dict>
+    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>LowPriorityIO</key>
