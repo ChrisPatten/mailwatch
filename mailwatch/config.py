@@ -36,6 +36,7 @@ class Config:
     backfill_days: int
     lock_stale_minutes: int
     workers: int
+    stale_minutes: int
     max_message_mb: int
     fetch: dict[str, Any]
     notify: dict[str, Any]
@@ -97,6 +98,7 @@ def load(path: str | Path | None = None) -> Config:
         backfill_days=int(run.get("backfill_days", 7)),
         lock_stale_minutes=int(run.get("lock_stale_minutes", 30)),
         workers=max(1, int(run.get("workers", 4))),
+        stale_minutes=int(run.get("stale_minutes", 45)),
         max_message_mb=int(run.get("max_message_mb", 40)),
         fetch=fetch,
         notify=notify,

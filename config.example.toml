@@ -11,6 +11,7 @@ retention_days = 7                 # raw mail, fetched pages, records and digest
 backfill_days = 7                  # how far back the first run reads
 lock_stale_minutes = 30
 workers = 4                        # parallel model calls and fetches
+stale_minutes = 45                 # `since`/`status` report a fault if no run finished in this long
 max_message_mb = 40                # bigger messages: headers + first 2 MB only
 
 [fetch]

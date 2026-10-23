@@ -244,3 +244,19 @@ def test_reprocess_from_fetch_uses_current_rules(cfg):
     links = {l["anchor"]: l["status"] for l in p2.store.links(vz["id"])}
     assert links["View bill"] == "skipped"
     assert not [a for a in p2.store.artifacts(vz["id"]) if a["source"] == "fetch"]
+
+
+def test_since_reports_stale_watcher(cfg, capsys):
+    import os
+    from mailwatch.cli import main
+    p, _, _ = _pipe(cfg, _box())
+    p.run()
+    os.environ["MAILWATCH_CONFIG"] = str(cfg.home.parent / "config.toml")
+    main(["since"])
+    assert "stale" not in capsys.readouterr().out
+    p.store.x("UPDATE runs SET finished = finished - 4*3600")
+    main(["since"])
+    out = capsys.readouterr().out
+    assert "Watcher fault: stale" in out and "4h" in out
+    main(["status"])
+    assert "FAULT stale" in capsys.readouterr().out

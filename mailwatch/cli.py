@@ -25,6 +25,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import config as config_mod
 
@@ -107,6 +108,9 @@ def cmd_status(cfg: config_mod.Config, a: argparse.Namespace) -> int:
     stuck = s.q("SELECT stage, count(*) c FROM messages WHERE stage<>'done' GROUP BY stage")
     if stuck:
         print("in flight: " + ", ".join(f"{r['stage']} {r['c']}" for r in stuck))
+    stale = stale_warning(cfg, last)
+    if stale:
+        print(stale.replace("Watcher fault: ", "FAULT "))
     for f in s.open_faults():
         print(f"FAULT {f['key']}: {f['detail']}")
     return 0
@@ -168,6 +172,20 @@ def cmd_digest(cfg: config_mod.Config, a: argparse.Namespace) -> int:
     return 0
 
 
+def stale_warning(cfg: config_mod.Config, last: Any) -> str:
+    """The watcher can't report its own absence, so readers check it: no finished run within
+    [run].stale_minutes means the scheduler stopped or runs are hanging."""
+    if not last:
+        return "Watcher fault: stale: mailwatch has never completed a run."
+    age = time.time() - float(last["finished"])
+    if age <= cfg.stale_minutes * 60:
+        return ""
+    h, m = divmod(int(age // 60), 60)
+    return (f"Watcher fault: stale: no mailwatch run has finished since "
+            f"{datetime.fromtimestamp(last['finished']):%Y-%m-%d %H:%M} ({h}h {m}m ago); mail after that is "
+            f"unread. Check the scheduler (macOS: launchctl print gui/$(id -u)/com.mailwatch.run).")
+
+
 def cmd_since(cfg: config_mod.Config, a: argparse.Namespace) -> int:
     """What the downstream agent reads: records emitted since its cursor, plus health. Reads the out dir only."""
     from . import emit
@@ -184,7 +202,10 @@ def cmd_since(cfg: config_mod.Config, a: argparse.Namespace) -> int:
         st = json.loads(last["stats"])
         seen = ", ".join(f"{k} {sum(f['seen'] for f in v['folders'].values())} / "
                          f"{sum(f['server'] for f in v['folders'].values())}" for k, v in st["accounts"].items())
-        lines += ["", f"Last run {datetime.fromtimestamp(last['finished']):%H:%M}. Seen: {seen}"]
+        lines += ["", f"Last run {datetime.fromtimestamp(last['finished']):%Y-%m-%d %H:%M}. Seen: {seen}"]
+    stale = stale_warning(cfg, last)
+    if stale:
+        lines.append(stale)
     for f in s.open_faults():
         lines.append(f"Watcher fault: {f['key']}: {f['detail']}")
     lines += emit.render_items(recs) if recs else ["", "No new records."]
