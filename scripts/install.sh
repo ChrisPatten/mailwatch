@@ -73,8 +73,16 @@ rm -f .keychain-refs
 
 if [[ "${1:-}" == "--load" ]]; then
   PL="$HOME/Library/LaunchAgents/com.mailwatch.run.plist"
+  SVC="gui/$(id -u)/com.mailwatch.run"
   sed -e "s#@ROOT@#$ROOT#g" -e "s#@CONFIG@#$CONFIG#g" launchd/com.mailwatch.run.plist.template > "$PL"
-  launchctl bootout "gui/$(id -u)/com.mailwatch.run" 2>/dev/null || true
+  plutil -lint "$PL" >/dev/null || { echo "rendered plist is invalid: $PL"; exit 1; }
+  launchctl bootout "$SVC" 2>/dev/null || true
+  # bootout is asynchronous; bootstrapping before it finishes can leave a half-loaded job.
+  for _ in $(seq 1 20); do launchctl print "$SVC" >/dev/null 2>&1 || break; sleep 0.5; done
+  launchctl enable "$SVC"
   launchctl bootstrap "gui/$(id -u)" "$PL"
-  echo "loaded com.mailwatch.run (every 15 min). Logs: $ROOT/logs/"
+  launchctl kickstart "$SVC"          # don't rely on RunAtLoad: start one run now
+  sleep 2
+  echo "loaded com.mailwatch.run (every 15 min, :00/:15/:30/:45). $(launchctl print "$SVC" | grep -E '^\s*runs = ' | xargs)"
+  echo "Logs: $ROOT/logs/   Check later: launchctl print $SVC | grep -E 'runs|last exit'"
 fi
