@@ -1,0 +1,78 @@
+# mailwatch config. Copy to config.toml (git-ignored) and edit.
+# Secrets are references, never values: keychain://<service>/<account> (macOS) or env://VAR.
+
+[paths]
+# home = "."                       # state.db, raw/, logs/. Default: the directory this file is in.
+out = "~/my-agent/data/mail"       # the ONLY directory your agent should read. Default: <home>/out
+# watchlist = "~/my-agent/memory/email_watchlist.md"   # optional; see README "Watchlist"
+
+[run]
+retention_days = 7                 # raw mail, fetched pages, records and digests are deleted after this
+backfill_days = 7                  # how far back the first run reads
+lock_stale_minutes = 30
+workers = 4                        # parallel model calls and fetches
+max_message_mb = 40                # bigger messages: headers + first 2 MB only
+
+[fetch]
+enabled = true
+max_per_run = 100
+max_per_domain = 5
+max_per_message = 5
+timeout_s = 15
+max_mb = 10
+skip_domains = ["amazon.com"]      # never fetched (bot-walled or login-only); links stay listed for a human
+
+[notify]
+# Wake your agent when a run finds new priority mail or a watcher fault. Off by default.
+enabled = false
+format = "json"                    # "json": POST {source, text, priority, faults, digest} to url
+url = "http://127.0.0.1:8080/hooks/mailwatch"
+# format = "command"               # or run a program with the message on stdin (argv list, no shell)
+# command = ["/usr/local/bin/notify-my-agent"]
+fault_repeat_hours = 6
+
+[models]
+# provider:model. openai and anthropic are supported; pick per stage (see README "Choosing models").
+triage = "openai:gpt-6-luna"
+extract = "openai:gpt-6-luna"
+extract_important = "openai:gpt-6-sol"   # priority + personal mail
+ask = "openai:gpt-6-sol"
+openai_reasoning_effort = "low"
+anthropic_thinking_budget = 0            # 0 = off
+
+[keys]
+openai = "keychain://mailwatch/openai"
+anthropic = "keychain://mailwatch/anthropic"
+
+[owner]
+name = "Alex Example"
+addresses = ["alex@example.com", "alex.example@gmail.com"]   # mail FROM these is "outbound"
+exclude_senders = ["my-agent@example.com"]                   # your agent's own mailbox, if it has one
+# Trusted context for the system prompts: who you are, who matters, what "priority" means to you.
+# Keep it short; it is sent with every model call.
+context = """
+Alex lives with partner Sam and two kids. Household bills are paid from one checking account.
+Anything from the kids' school, the pediatrician or the mortgage servicer is important.
+"""
+
+[[accounts]]
+id = "icloud"
+kind = "icloud"                    # icloud | gmail | imap
+host = "imap.mail.me.com"
+username = "alex@example.com"      # iCloud custom-domain addresses arrive in the same mailbox
+secret = "keychain://mailwatch/icloud"
+skip_folders = ["Deleted Messages", "Drafts", "Notes"]
+
+[[accounts]]
+id = "gmail"
+kind = "gmail"                     # syncs [Gmail]/All Mail + [Gmail]/Spam only
+host = "imap.gmail.com"
+username = "alex.example@gmail.com"
+secret = "keychain://mailwatch/gmail"
+
+# [[accounts]]
+# id = "fastmail"
+# kind = "imap"
+# host = "imap.fastmail.com"
+# username = "alex@fastmail.com"
+# secret = "env://FASTMAIL_APP_PASSWORD"

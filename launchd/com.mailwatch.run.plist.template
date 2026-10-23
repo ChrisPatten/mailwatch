@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Rendered by scripts/install.sh --load (@ROOT@ and @CONFIG@ are filled in). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mailwatch.run</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@ROOT@/.venv/bin/mailwatch</string>
+        <string>run</string>
+    </array>
+
+    <!-- Every 15 minutes. After sleep, launchd fires on wake and last_uid catches up. -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <key>WorkingDirectory</key>
+    <string>@ROOT@</string>
+    <key>StandardOutPath</key>
+    <string>@ROOT@/logs/launchd.out</string>
+    <key>StandardErrorPath</key>
+    <string>@ROOT@/logs/launchd.err</string>
+
+    <!-- No secrets here. Keys and passwords come from the login keychain. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MAILWATCH_CONFIG</key>
+        <string>@CONFIG@</string>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

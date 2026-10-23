@@ -1,0 +1,16 @@
+config.toml
+state.db*
+raw/
+logs/
+eval/
+run.lock
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+.fuse_*
+out/
+local/
+.keychain-refs
+*.tmp
